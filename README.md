@@ -1,5 +1,7 @@
 # ZidamOS
 
+Resource: https://os.phil-opp.com/
+
 ## 27-01-2023
 
 ### Working with no standard libraries in Rust
@@ -64,3 +66,80 @@ error: linking with `cc` failed: exit status: 1
 ```
 
 The problem is, the linker uses the libraries in underlying OS. It supposes that the OS has a C linker (both Windows, Linux and MacOS is built using C).
+
+## 02-02-2023
+
+### Bootloader
+
+`A cumbersome problem [HARD to develop]`
+
+Tools to create a bootable disk image:
+https://github.com/rust-osdev/bootimage
+
+#### Bootloader => Kernel
+
+Kernel is a disk image that is flashed from memory for the systems to operate by a bootloader. Kernel acts as an underlying interface that connects the operating system with device drivers or file system drivers.
+
+#### Definition
+
+On the other hand, bootloader requires at the start up time of the system when the Operating System is not ready yet.
+
+Bootloader is an instruction that load the kernel into memory. Bootloader has a size (512 bytes - 1024 bytes) to handle the boots up and configuration process then pass the control back to the OS when it’s ready. Most bootloader will have size larger than 512 bytes even though the resource spent bootloader is limited. Hence, there are two stages of bootloading handled before kernel wakes and after kernel wakes up.
+
+Bootloader also include the task to load assembly code into a minimal kernel after booting up.
+
+The kernel is passed a very minimal environment, in which the stack is not set up yet, virtual memory is not yet enabled, hardware is not initialized, and so on.
+
+### BIOS / UEFI
+
+`UEFI (Unversial Extensible Firmware Interface) / BIOS (Basic Input Output System)` are two specifications used for booting up the kernel in OS development. UEFI is designed to overcome the limitation of BIOS.
+
+UEFI stands for Unified Extensible Firmware Interface. It's a modern solution to be gradually replacing the legacy BIOS on PCs since the introduction to Windows with Windows Vista Service Pack 1 and Windows 7 in 2007. Most recent years of computer manufacturers are shipping desktops and laptops with UEFI support, be it a refinement of the traditional BIOS, and a successor that aims to dominate the future firmware mode.
+
+#### Target specification
+
+As we can't use listed target from Rust for this OS project, we must have a file to specifically config the compiler `rustup`. We will use `rustup` so that we can use experimental feature of Rust.
+
+```diff
+{
+  "llvm-target": "x86_64-unknown-linux-gnu",
+  "data-layout": "e-m:e-i64:64-f80:128-n8:16:32:64-S128",
+  "arch": "x86_64",
+  "target-endian": "little",
+  "target-pointer-width": "64",
+  "target-c-int-width": "32",
+
+  "executables": true,
+  "linker-flavor": "gcc",
+  "pre-link-args": ["-m64"],
+  "morestack": false
+}
+{
++ "llvm-target": "x86_64-unknown-none", // triple target
+- "llvm-target": "x86_64-unknown-linux-gnu",
+  "data-layout": "e-m:e-i64:64-f80:128-n8:16:32:64-S128",
+  "arch": "x86_64",
+  "target-endian": "little", // byte order
+  "target-pointer-width": "64",
+  "target-c-int-width": "32",
++ "os": "none", // operating system
+- "os": "linux",
+  "executables": true,
+  /// Instead of using the platform’s default linker
+  /// (which might not support Linux targets),
+  /// we use the cross-platform LLD linker that
+  /// is shipped with Rust for linking our kernel.
++ "linker-flavor": "ld.lld",
++ "linker": "rust-lld",
+  // This is to disable `stack unwinding`
++ "panic-strategy": "abort",
+  // Redzone optimization might lead to side effect if the data stored in redzone is overridden not on purpose.
++ "disable-redzone": true,
+   // Disable Single Instruction, Multiple Data (SIMD)
++ "features": "-mmx,-sse,+soft-float"
+}
+```
+
+#### Why disable SIMD? `-mmx`, `-sse`
+
+Using the large SIMD registers in OS kernels leads to performance problems. The reason is that the kernel needs to restore all registers to their original state before continuing an interrupted program. This means that the kernel has to save the complete SIMD state to main memory on each system call or hardware interrupt. Since the SIMD state is very large (512–1600 bytes) and interrupts can occur very often, these additional save/restore operations considerably harm performance. To avoid this, we disable SIMD for our kernel (not for applications running on top!).
